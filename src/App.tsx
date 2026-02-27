@@ -116,7 +116,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
   }, [queue, volunteerId, missionId, name, org]);
 
   useEffect(() => {
-    const interval = setInterval(syncQueue, 10000);
+    const interval = setInterval(syncQueue, 30000);
     return () => clearInterval(interval);
   }, [syncQueue]);
 
@@ -304,6 +304,43 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
   const appUrl = window.location.origin;
   const joinUrl = `${appUrl}?m=${missionId}`;
 
+  const exportKML = () => {
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${data.mission.name}</name>
+    <description>Tracce volontari - ${new Date().toLocaleString()}</description>
+${data.volunteers.map(v => {
+  const volunteerLocs = data.locations.filter(l => l.volunteer_id === v.id);
+  if (volunteerLocs.length === 0) return '';
+  return `    <Placemark>
+      <name>${v.name} - ${v.organization}</name>
+      <description>Traccia completa</description>
+      <Style>
+        <LineStyle>
+          <color>ff0000ff</color>
+          <width>3</width>
+        </LineStyle>
+      </Style>
+      <LineString>
+        <coordinates>
+${volunteerLocs.map(l => `          ${l.lng},${l.lat},0`).join('\n')}
+        </coordinates>
+      </LineString>
+    </Placemark>`;
+}).join('\n')}
+  </Document>
+</kml>`;
+    
+    const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${data.mission.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.kml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="h-screen flex flex-col bg-zinc-50">
       <Header title={data.mission.name} subtitle={`Codice: ${missionId}`} icon={Shield} />
@@ -319,6 +356,20 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
               <QRCodeSVG value={joinUrl} size={150} />
               <p className="text-[10px] text-zinc-400 text-center break-all">{joinUrl}</p>
             </Card>
+          </section>
+
+          <section className="space-y-3">
+            <button 
+              onClick={exportKML}
+              disabled={data.locations.length === 0}
+              className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-emerald-700 active:scale-95 transition-all disabled:bg-zinc-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <MapIcon size={18} />
+              Scarica Tracce KML
+            </button>
+            {data.locations.length === 0 && (
+              <p className="text-xs text-zinc-400 text-center">Nessuna posizione registrata</p>
+            )}
           </section>
 
           <section className="space-y-3">
