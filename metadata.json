@@ -1,0 +1,7 @@
+{
+  "name": "RescueTrack - Coordinamento Ricerche",
+  "description": "App per il tracciamento GPS in tempo reale dei volontari durante operazioni di ricerca e soccorso con supporto offline.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
