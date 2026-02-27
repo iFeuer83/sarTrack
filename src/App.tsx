@@ -128,6 +128,8 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
     setIsJoined(true);
     setIsTracking(true);
 
+    let firstPositionSent = false;
+
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
         setLastPos(pos.coords);
@@ -136,7 +138,31 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
           lng: pos.coords.longitude,
           timestamp: new Date().toISOString()
         };
-        setQueue(prev => [...prev, newLoc]);
+        setQueue(prev => {
+          const updated = [...prev, newLoc];
+          
+          // Invia immediatamente le prime 3 posizioni
+          if (!firstPositionSent && updated.length >= 3) {
+            firstPositionSent = true;
+            fetch('/api/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                volunteerId,
+                missionId,
+                name,
+                organization: org,
+                locations: updated
+              })
+            }).then(res => {
+              if (res.ok) {
+                setQueue([]);
+              }
+            }).catch(e => console.error("Sync iniziale fallito", e));
+          }
+          
+          return updated;
+        });
       },
       (err) => console.error(err),
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
@@ -304,41 +330,62 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
   const appUrl = window.location.origin;
   const joinUrl = `${appUrl}?m=${missionId}`;
 
-  const exportKML = () => {
-    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+  const exportKML = (volunteerId?: string) => {
+    const volunteers = volunteerId 
+      ? data.volunteers.filter(v => v.id === volunteerId)
+      : data.volunteers;
+
+    volunteers.forEach(v => {
+      const volunteerLocs = data.locations.filter(l => l.volunteer_id === v.id);
+      if (volunteerLocs.length === 0) return;
+
+      const kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>${data.mission.name}</name>
-    <description>Tracce volontari - ${new Date().toLocaleString()}</description>
-${data.volunteers.map(v => {
-  const volunteerLocs = data.locations.filter(l => l.volunteer_id === v.id);
-  if (volunteerLocs.length === 0) return '';
-  return `    <Placemark>
-      <name>${v.name} - ${v.organization}</name>
-      <description>Traccia completa</description>
-      <Style>
-        <LineStyle>
-          <color>ff0000ff</color>
-          <width>3</width>
-        </LineStyle>
-      </Style>
+    <name>${v.name} - ${v.organization}</name>
+    <description>Traccia ${data.mission.name} - ${new Date().toLocaleString()}</description>
+    <Style id="trackStyle">
+      <LineStyle>
+        <color>ff0000ff</color>
+        <width>3</width>
+      </LineStyle>
+      <IconStyle>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/paddle/red-circle.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Placemark>
+      <name>Traccia ${v.name}</name>
+      <description>${volunteerLocs.length} punti registrati</description>
+      <styleUrl>#trackStyle</styleUrl>
       <LineString>
+        <tessellate>1</tessellate>
         <coordinates>
 ${volunteerLocs.map(l => `          ${l.lng},${l.lat},0`).join('\n')}
         </coordinates>
       </LineString>
-    </Placemark>`;
-}).join('\n')}
+    </Placemark>
+${volunteerLocs.map((l, idx) => `    <Placemark>
+      <name>Punto ${idx + 1}</name>
+      <description>${new Date(l.timestamp).toLocaleString()}</description>
+      <styleUrl>#trackStyle</styleUrl>
+      <Point>
+        <coordinates>${l.lng},${l.lat},0</coordinates>
+      </Point>
+    </Placemark>`).join('\n')}
   </Document>
 </kml>`;
-    
-    const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${data.mission.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.kml`;
-    a.click();
-    URL.revokeObjectURL(url);
+      
+      const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const fileName = `${v.name.replace(/\s+/g, '_')}_${data.mission.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.kml`;
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
   };
 
   return (
@@ -379,20 +426,32 @@ ${volunteerLocs.map(l => `          ${l.lng},${l.lat},0`).join('\n')}
             <div className="space-y-2">
               {data.volunteers.map(v => {
                 const loc = data.locations.find(l => l.volunteer_id === v.id);
+                const volunteerLocs = data.locations.filter(l => l.volunteer_id === v.id);
                 return (
-                  <div key={v.id} className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center gap-3">
-                    <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center border border-zinc-200 text-zinc-600">
-                      <User size={16} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-zinc-900 truncate">{v.name}</p>
-                      <p className="text-[10px] text-zinc-500 uppercase font-medium">{v.organization}</p>
-                    </div>
-                    {loc && (
-                      <div className="text-right">
-                        <p className="text-[10px] text-emerald-600 font-bold">ATTIVO</p>
-                        <p className="text-[9px] text-zinc-400">{new Date(loc.timestamp).toLocaleTimeString()}</p>
+                  <div key={v.id} className="p-3 bg-zinc-50 rounded-xl border border-zinc-100">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center border border-zinc-200 text-zinc-600">
+                        <User size={16} />
                       </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-zinc-900 truncate">{v.name}</p>
+                        <p className="text-[10px] text-zinc-500 uppercase font-medium">{v.organization}</p>
+                      </div>
+                      {loc && (
+                        <div className="text-right">
+                          <p className="text-[10px] text-emerald-600 font-bold">ATTIVO</p>
+                          <p className="text-[9px] text-zinc-400">{new Date(loc.timestamp).toLocaleTimeString()}</p>
+                        </div>
+                      )}
+                    </div>
+                    {volunteerLocs.length > 0 && (
+                      <button
+                        onClick={() => exportKML(v.id)}
+                        className="w-full text-xs bg-white hover:bg-zinc-100 text-zinc-700 font-medium py-2 px-3 rounded-lg border border-zinc-200 transition-colors flex items-center justify-center gap-1"
+                      >
+                        <MapIcon size={12} />
+                        Scarica KML ({volunteerLocs.length} punti)
+                      </button>
                     )}
                   </div>
                 );
