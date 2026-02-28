@@ -12,6 +12,7 @@ const __dirname = path.dirname(__filename);
 const dbPath = path.resolve(__dirname, "rescue.db");
 console.log(`Initializing database at: ${dbPath}`);
 const db = new Database(dbPath);
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "test2026";
 
 // Initialize DB
 db.exec(`
@@ -43,6 +44,18 @@ db.exec(`
   );
 `);
 
+function ensureColumn(table: string, column: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  const exists = columns.some((c) => c.name === column);
+  if (!exists) {
+    db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+  }
+}
+
+ensureColumn("missions", "active", "INTEGER DEFAULT 1");
+ensureColumn("volunteers", "dismissed", "INTEGER DEFAULT 0");
+ensureColumn("volunteers", "dismissed_at", "DATETIME");
+
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
@@ -55,6 +68,14 @@ async function startServer() {
   app.use(express.json());
 
   // API Routes
+  app.post("/api/admin/auth", (req, res) => {
+    const { password } = req.body;
+    if (password === ADMIN_PASSWORD) {
+      return res.json({ success: true });
+    }
+    return res.status(401).json({ error: "Password admin non valida" });
+  });
+
   app.post("/api/missions", (req, res) => {
     const { name } = req.body;
     const id = Math.random().toString(36).substring(2, 9).toUpperCase();
@@ -70,7 +91,7 @@ async function startServer() {
         return res.status(404).json({ error: "Missione non trovata" });
       }
       
-      const volunteers = db.prepare("SELECT * FROM volunteers WHERE mission_id = ?").all(req.params.id);
+      const volunteers = db.prepare("SELECT *, COALESCE(dismissed, 0) as dismissed FROM volunteers WHERE mission_id = ?").all(req.params.id);
       const locations = db.prepare(`
         SELECT l.* FROM locations l
         JOIN (
@@ -88,24 +109,77 @@ async function startServer() {
     }
   });
 
+  app.patch("/api/missions/:id/status", (req, res) => {
+    const { active } = req.body;
+    if (typeof active !== "boolean") {
+      return res.status(400).json({ error: "Valore active non valido" });
+    }
+
+    const update = db.prepare("UPDATE missions SET active = ? WHERE id = ?").run(active ? 1 : 0, req.params.id);
+    if (update.changes === 0) {
+      return res.status(404).json({ error: "Missione non trovata" });
+    }
+
+    io.to(`mission:${req.params.id}`).emit("update", { type: "mission-status", active });
+    return res.json({ success: true, active });
+  });
+
+  app.patch("/api/missions/:id/volunteers/:volunteerId/dismiss", (req, res) => {
+    const { dismissed } = req.body;
+    if (typeof dismissed !== "boolean") {
+      return res.status(400).json({ error: "Valore dismissed non valido" });
+    }
+
+    const update = db.prepare(`
+      UPDATE volunteers
+      SET dismissed = ?, dismissed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END
+      WHERE id = ? AND mission_id = ?
+    `).run(dismissed ? 1 : 0, dismissed ? 1 : 0, req.params.volunteerId, req.params.id);
+
+    if (update.changes === 0) {
+      return res.status(404).json({ error: "Volontario non trovato" });
+    }
+
+    io.to(`mission:${req.params.id}`).emit("update", {
+      type: "volunteer-dismiss",
+      volunteerId: req.params.volunteerId,
+      dismissed,
+    });
+
+    return res.json({ success: true, dismissed });
+  });
+
   app.post("/api/sync", (req, res) => {
     const { volunteerId, missionId, name, organization, locations } = req.body;
+
+    const mission = db.prepare("SELECT id, active FROM missions WHERE id = ?").get(missionId) as { id: string; active: number } | undefined;
+    if (!mission) {
+      return res.status(404).json({ error: "Missione non trovata" });
+    }
+    if (mission.active !== 1) {
+      return res.status(403).json({ error: "Missione chiusa: trasmissione non consentita" });
+    }
     
     // Ensure volunteer exists
-    const volunteer = db.prepare("SELECT id FROM volunteers WHERE id = ?").get(volunteerId);
+    const volunteer = db.prepare("SELECT id, COALESCE(dismissed, 0) as dismissed FROM volunteers WHERE id = ?").get(volunteerId) as { id: string; dismissed: number } | undefined;
+    if (volunteer?.dismissed === 1) {
+      return res.status(403).json({ error: "Trasmissione dismessa dall'amministratore" });
+    }
+
     if (!volunteer) {
       db.prepare("INSERT INTO volunteers (id, mission_id, name, organization) VALUES (?, ?, ?, ?)")
         .run(volunteerId, missionId, name, organization);
     }
 
     // Insert locations
+    const safeLocations = Array.isArray(locations) ? locations : [];
     const insertLoc = db.prepare("INSERT INTO locations (volunteer_id, mission_id, lat, lng, timestamp) VALUES (?, ?, ?, ?, ?)");
     const transaction = db.transaction((locs) => {
       for (const loc of locs) {
         insertLoc.run(volunteerId, missionId, loc.lat, loc.lng, loc.timestamp);
       }
     });
-    transaction(locations);
+    transaction(safeLocations);
 
     // Update last seen
     db.prepare("UPDATE volunteers SET last_seen = CURRENT_TIMESTAMP WHERE id = ?").run(volunteerId);
@@ -115,7 +189,7 @@ async function startServer() {
       volunteerId,
       name,
       organization,
-      latestLocation: locations[locations.length - 1]
+      latestLocation: safeLocations[safeLocations.length - 1]
     });
 
     res.json({ success: true });

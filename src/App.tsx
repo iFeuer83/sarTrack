@@ -14,7 +14,11 @@ import {
   ChevronRight,
   User,
   Shield,
-  Activity
+  Activity,
+  Lock,
+  PauseCircle,
+  PlayCircle,
+  UserX
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -36,12 +40,15 @@ interface Volunteer {
   name: string;
   organization: string;
   lastLocation?: Location;
-  status: 'online' | 'offline';
+  status?: 'online' | 'offline';
+  last_seen?: string;
+  dismissed?: number;
 }
 
 interface Mission {
   id: string;
   name: string;
+  active: number;
 }
 
 // --- Components ---
@@ -73,8 +80,21 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
   const [lastPos, setLastPos] = useState<GeolocationCoordinates | null>(null);
   const [queue, setQueue] = useState<Location[]>(JSON.parse(localStorage.getItem('rt_queue') || '[]'));
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const watchIdRef = useRef<number | null>(null);
+  const sessionBlockedRef = useRef(false);
   
   const volunteerId = useRef(localStorage.getItem('rt_vid') || Math.random().toString(36).substring(2, 15)).current;
+
+  const stopTracking = useCallback((removeJoined = false) => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setIsTracking(false);
+    if (removeJoined) {
+      localStorage.removeItem('rt_joined');
+    }
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('rt_vid', volunteerId);
@@ -109,16 +129,30 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
       });
       if (res.ok) {
         setQueue([]);
+      } else if (res.status === 403 && !sessionBlockedRef.current) {
+        sessionBlockedRef.current = true;
+        const err = await res.json().catch(() => ({ error: "Trasmissione non consentita" }));
+        alert(err.error || "Trasmissione non consentita");
+        stopTracking(true);
+        window.location.reload();
       }
     } catch (e) {
       console.error("Sync failed", e);
     }
-  }, [queue, volunteerId, missionId, name, org]);
+  }, [queue, volunteerId, missionId, name, org, stopTracking]);
 
   useEffect(() => {
-    const interval = setInterval(syncQueue, 30000);
+    const interval = setInterval(syncQueue, 10000);
     return () => clearInterval(interval);
   }, [syncQueue]);
+
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
+  }, []);
 
   const startTracking = () => {
     if (!name) return alert("Inserisci il tuo nome");
@@ -128,9 +162,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
     setIsJoined(true);
     setIsTracking(true);
 
-    let firstPositionSent = false;
-
-    const watchId = navigator.geolocation.watchPosition(
+    watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         setLastPos(pos.coords);
         const newLoc = {
@@ -138,37 +170,11 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
           lng: pos.coords.longitude,
           timestamp: new Date().toISOString()
         };
-        setQueue(prev => {
-          const updated = [...prev, newLoc];
-          
-          // Invia immediatamente le prime 3 posizioni
-          if (!firstPositionSent && updated.length >= 3) {
-            firstPositionSent = true;
-            fetch('/api/sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                volunteerId,
-                missionId,
-                name,
-                organization: org,
-                locations: updated
-              })
-            }).then(res => {
-              if (res.ok) {
-                setQueue([]);
-              }
-            }).catch(e => console.error("Sync iniziale fallito", e));
-          }
-          
-          return updated;
-        });
+        setQueue(prev => [...prev, newLoc]);
       },
       (err) => console.error(err),
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
     );
-
-    return () => navigator.geolocation.clearWatch(watchId);
   };
 
   if (!isJoined) {
@@ -258,7 +264,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
         <button 
           onClick={() => {
             if(confirm("Sei sicuro di voler interrompere il tracciamento?")) {
-              localStorage.removeItem('rt_joined');
+              stopTracking(true);
               window.location.reload();
             }
           }}
@@ -275,7 +281,8 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
 const CoordinatorView = ({ missionId }: { missionId: string }) => {
   const [data, setData] = useState<{ mission: Mission; volunteers: Volunteer[]; locations: any[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [actionLoading, setActionLoading] = useState<'mission' | string | null>(null);
+  const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
   const fetchData = useCallback(async () => {
     try {
@@ -298,9 +305,49 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
     const s = io();
     s.emit('join-mission', missionId);
     s.on('update', () => fetchData());
-    setSocket(s);
     return () => { s.disconnect(); };
   }, [missionId, fetchData]);
+
+  const toggleMissionStatus = async () => {
+    if (!data) return;
+    setActionLoading('mission');
+    try {
+      const res = await fetch(`/api/missions/${missionId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: data.mission.active !== 1 })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Errore aggiornando stato missione');
+      }
+      await fetchData();
+    } catch (e: any) {
+      alert(e.message || 'Errore aggiornando stato missione');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const dismissVolunteer = async (volunteerId: string) => {
+    setActionLoading(volunteerId);
+    try {
+      const res = await fetch(`/api/missions/${missionId}/volunteers/${volunteerId}/dismiss`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dismissed: true })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Errore durante dismissione volontario');
+      }
+      await fetchData();
+    } catch (e: any) {
+      alert(e.message || 'Errore durante dismissione volontario');
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   if (error) {
     return (
@@ -329,64 +376,10 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
 
   const appUrl = window.location.origin;
   const joinUrl = `${appUrl}?m=${missionId}`;
-
-  const exportKML = (volunteerId?: string) => {
-    const volunteers = volunteerId 
-      ? data.volunteers.filter(v => v.id === volunteerId)
-      : data.volunteers;
-
-    volunteers.forEach(v => {
-      const volunteerLocs = data.locations.filter(l => l.volunteer_id === v.id);
-      if (volunteerLocs.length === 0) return;
-
-      const kml = `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <name>${v.name} - ${v.organization}</name>
-    <description>Traccia ${data.mission.name} - ${new Date().toLocaleString()}</description>
-    <Style id="trackStyle">
-      <LineStyle>
-        <color>ff0000ff</color>
-        <width>3</width>
-      </LineStyle>
-      <IconStyle>
-        <Icon>
-          <href>http://maps.google.com/mapfiles/kml/paddle/red-circle.png</href>
-        </Icon>
-      </IconStyle>
-    </Style>
-    <Placemark>
-      <name>Traccia ${v.name}</name>
-      <description>${volunteerLocs.length} punti registrati</description>
-      <styleUrl>#trackStyle</styleUrl>
-      <LineString>
-        <tessellate>1</tessellate>
-        <coordinates>
-${volunteerLocs.map(l => `          ${l.lng},${l.lat},0`).join('\n')}
-        </coordinates>
-      </LineString>
-    </Placemark>
-${volunteerLocs.map((l, idx) => `    <Placemark>
-      <name>Punto ${idx + 1}</name>
-      <description>${new Date(l.timestamp).toLocaleString()}</description>
-      <styleUrl>#trackStyle</styleUrl>
-      <Point>
-        <coordinates>${l.lng},${l.lat},0</coordinates>
-      </Point>
-    </Placemark>`).join('\n')}
-  </Document>
-</kml>`;
-      
-      const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const fileName = `${v.name.replace(/\s+/g, '_')}_${data.mission.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.kml`;
-      a.href = url;
-      a.download = fileName;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-  };
+  const visibleLocations = data.locations.filter(loc => {
+    const volunteer = data.volunteers.find(v => v.id === loc.volunteer_id);
+    return volunteer?.dismissed !== 1;
+  });
 
   return (
     <div className="h-screen flex flex-col bg-zinc-50">
@@ -395,6 +388,39 @@ ${volunteerLocs.map((l, idx) => `    <Placemark>
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Sidebar */}
         <div className="w-full lg:w-80 border-r border-zinc-200 bg-white overflow-y-auto p-4 space-y-6">
+          <section className="space-y-3">
+            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
+              <Shield size={14} /> Stato Intervento
+            </h3>
+            <Card className="p-4 bg-zinc-50 border-zinc-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-zinc-700">Missione</p>
+                <span className={cn(
+                  "text-[10px] px-2 py-1 rounded-full font-bold",
+                  data.mission.active === 1 ? "bg-emerald-100 text-emerald-700" : "bg-zinc-200 text-zinc-700"
+                )}>
+                  {data.mission.active === 1 ? 'APERTA' : 'CHIUSA'}
+                </span>
+              </div>
+              <button
+                onClick={toggleMissionStatus}
+                disabled={actionLoading === 'mission'}
+                className={cn(
+                  "w-full py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors",
+                  data.mission.active === 1 ? "bg-zinc-900 text-white hover:bg-zinc-700" : "bg-emerald-600 text-white hover:bg-emerald-700",
+                  actionLoading === 'mission' && "opacity-60 cursor-not-allowed"
+                )}
+              >
+                {data.mission.active === 1 ? <PauseCircle size={16} /> : <PlayCircle size={16} />}
+                {actionLoading === 'mission'
+                  ? 'Aggiornamento...'
+                  : data.mission.active === 1
+                    ? 'Chiudi Intervento'
+                    : 'Riapri Intervento'}
+              </button>
+            </Card>
+          </section>
+
           <section className="space-y-3">
             <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
               <QrCode size={14} /> QR Code Accesso
@@ -406,52 +432,58 @@ ${volunteerLocs.map((l, idx) => `    <Placemark>
           </section>
 
           <section className="space-y-3">
-            <button 
-              onClick={exportKML}
-              disabled={data.locations.length === 0}
-              className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-emerald-700 active:scale-95 transition-all disabled:bg-zinc-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              <MapIcon size={18} />
-              Scarica Tracce KML
-            </button>
-            {data.locations.length === 0 && (
-              <p className="text-xs text-zinc-400 text-center">Nessuna posizione registrata</p>
-            )}
-          </section>
-
-          <section className="space-y-3">
             <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
               <Users size={14} /> Partecipanti ({data.volunteers.length})
             </h3>
             <div className="space-y-2">
               {data.volunteers.map(v => {
                 const loc = data.locations.find(l => l.volunteer_id === v.id);
-                const volunteerLocs = data.locations.filter(l => l.volunteer_id === v.id);
+                const lastUpdate = loc?.timestamp || v.last_seen;
+                const isDismissed = v.dismissed === 1;
+                const isStale = !isDismissed && (!lastUpdate || (Date.now() - new Date(lastUpdate).getTime() > STALE_THRESHOLD_MS));
+                const statusLabel = isDismissed ? 'DISMESSO' : (isStale ? 'FERMO' : 'TRASMETTE');
+                const statusColor = isDismissed
+                  ? 'text-red-600'
+                  : isStale
+                    ? 'text-amber-600'
+                    : 'text-emerald-600';
                 return (
-                  <div key={v.id} className="p-3 bg-zinc-50 rounded-xl border border-zinc-100">
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center border border-zinc-200 text-zinc-600">
-                        <User size={16} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-zinc-900 truncate">{v.name}</p>
-                        <p className="text-[10px] text-zinc-500 uppercase font-medium">{v.organization}</p>
-                      </div>
-                      {loc && (
-                        <div className="text-right">
-                          <p className="text-[10px] text-emerald-600 font-bold">ATTIVO</p>
-                          <p className="text-[9px] text-zinc-400">{new Date(loc.timestamp).toLocaleTimeString()}</p>
-                        </div>
+                  <div key={v.id} className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center gap-3">
+                    <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center border border-zinc-200 text-zinc-600">
+                      <User size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-zinc-900 truncate">{v.name}</p>
+                      <p className="text-[10px] text-zinc-500 uppercase font-medium">{v.organization}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className={cn("text-[10px] font-bold", statusColor)}>{statusLabel}</p>
+                      {lastUpdate && (
+                        <p className="text-[9px] text-zinc-400">{new Date(lastUpdate).toLocaleTimeString()}</p>
                       )}
                     </div>
-                    {volunteerLocs.length > 0 && (
+                    {!isDismissed && (
                       <button
-                        onClick={() => exportKML(v.id)}
-                        className="w-full text-xs bg-white hover:bg-zinc-100 text-zinc-700 font-medium py-2 px-3 rounded-lg border border-zinc-200 transition-colors flex items-center justify-center gap-1"
+                        onClick={() => {
+                          if (confirm(`Dismettere ${v.name} dalla trasmissione posizione?`)) {
+                            dismissVolunteer(v.id);
+                          }
+                        }}
+                        disabled={actionLoading === v.id}
+                        className={cn(
+                          "px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1",
+                          "border-red-200 text-red-600 hover:bg-red-50",
+                          actionLoading === v.id && "opacity-60 cursor-not-allowed"
+                        )}
                       >
-                        <MapIcon size={12} />
-                        Scarica KML ({volunteerLocs.length} punti)
+                        <UserX size={12} />
+                        {actionLoading === v.id ? '...' : 'DISMETTI'}
                       </button>
+                    )}
+                    {isDismissed && (
+                      <div className="px-2 py-1 rounded-lg text-[10px] font-bold border border-red-200 text-red-600 bg-red-50">
+                        DISMESSO
+                      </div>
                     )}
                   </div>
                 );
@@ -470,7 +502,7 @@ ${volunteerLocs.map((l, idx) => `    <Placemark>
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            {data.locations.map(loc => {
+            {visibleLocations.map(loc => {
               const v = data.volunteers.find(vol => vol.id === loc.volunteer_id);
               return (
                 <Marker key={loc.id} position={[loc.lat, loc.lng]}>
@@ -484,9 +516,81 @@ ${volunteerLocs.map((l, idx) => `    <Placemark>
                 </Marker>
               );
             })}
-            <MapUpdater locations={data.locations} />
+            <MapUpdater locations={visibleLocations} />
           </MapContainer>
         </div>
+      </div>
+    </div>
+  );
+};
+
+const AdminLoginView = ({ missionId, onSuccess }: { missionId: string; onSuccess: () => void }) => {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    if (!password) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Autenticazione fallita');
+      }
+      sessionStorage.setItem('rt_admin_auth', 'true');
+      onSuccess();
+    } catch (e: any) {
+      setError(e.message || 'Password non valida');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6">
+      <div className="max-w-md w-full">
+        <Card className="p-6 space-y-5">
+          <div className="text-center space-y-2">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-red-50 text-red-600 flex items-center justify-center">
+              <Lock size={26} />
+            </div>
+            <h2 className="text-2xl font-black text-zinc-900">Accesso Admin</h2>
+            <p className="text-sm text-zinc-500">Inserisci password dashboard per missione <span className="font-mono font-bold">{missionId}</span></p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-zinc-700">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleLogin();
+                }
+              }}
+              placeholder="Inserisci password admin"
+              className="w-full p-3 bg-zinc-50 border border-zinc-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none transition-all"
+            />
+            <p className="text-[11px] text-zinc-400">Password iniziale predefinita: test2026</p>
+          </div>
+          {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+          <button
+            onClick={handleLogin}
+            disabled={loading}
+            className={cn(
+              "w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-colors",
+              loading && "opacity-60 cursor-not-allowed"
+            )}
+          >
+            {loading ? 'Verifica in corso...' : 'Accedi alla Dashboard'}
+          </button>
+        </Card>
       </div>
     </div>
   );
@@ -507,6 +611,7 @@ function MapUpdater({ locations }: { locations: any[] }) {
 export default function App() {
   const [view, setView] = useState<'home' | 'coordinator' | 'volunteer'>('home');
   const [missionId, setMissionId] = useState<string | null>(null);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(sessionStorage.getItem('rt_admin_auth') === 'true');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -536,7 +641,12 @@ export default function App() {
   };
 
   if (view === 'volunteer' && missionId) return <VolunteerView missionId={missionId} />;
-  if (view === 'coordinator' && missionId) return <CoordinatorView missionId={missionId} />;
+  if (view === 'coordinator' && missionId) {
+    if (!isAdminAuthenticated) {
+      return <AdminLoginView missionId={missionId} onSuccess={() => setIsAdminAuthenticated(true)} />;
+    }
+    return <CoordinatorView missionId={missionId} />;
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6">

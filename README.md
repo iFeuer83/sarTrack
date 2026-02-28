@@ -7,6 +7,9 @@ Applicazione web per il tracciamento GPS in tempo reale dei volontari durante op
 - 📶 Supporto Offline: le posizioni vengono salvate localmente se non c'è campo e sincronizzate appena torna la connessione.
 - 📱 Accesso rapido tramite QR Code per i volontari.
 - 🗺️ Dashboard coordinatore con mappa interattiva (Leaflet).
+- 🔐 Accesso dashboard admin con password (default: `test2026`).
+- 🛠️ Controlli missione: apertura/chiusura intervento e dismissione volontari.
+- 🚦 Stato volontari in dashboard: verde (trasmette), arancione (fermo), rosso (dismesso).
 - 📦 Database locale SQLite.
 
 ## Requisiti
@@ -49,6 +52,6 @@ Applicazione web per il tracciamento GPS in tempo reale dei volontari durante op
 5. (Opzionale) Per non perdere i dati al riavvio, aggiungi un **Disk** (Volume) nelle impostazioni di Render e punta alla cartella dove risiede `rescue.db`.
 
 ## Note sulla Privacy e Sicurezza
-Questa è una versione MVP. Per l'uso in contesti operativi reali, si consiglia di:
-- Aggiungere una password per l'accesso alla Dashboard coordinatore.
+- Password admin predefinita: `test2026`.
+- Per ambienti reali, impostare una password diversa tramite variabile ambiente `ADMIN_PASSWORD`.
 - Utilizzare HTTPS (fornito automaticamente da Render/Vercel).
