@@ -18,7 +18,8 @@ import {
   Lock,
   PauseCircle,
   PlayCircle,
-  UserX
+  UserX,
+  Download
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -73,6 +74,7 @@ const Card = ({ children, className }: { children: ReactNode; className?: string
 
 // --- Volunteer View ---
 const VolunteerView = ({ missionId }: { missionId: string }) => {
+  const SYNC_INTERVAL_MS = 60_000;
   const [name, setName] = useState(localStorage.getItem('rt_name') || '');
   const [org, setOrg] = useState(localStorage.getItem('rt_org') || '');
   const [isJoined, setIsJoined] = useState(!!localStorage.getItem('rt_joined'));
@@ -82,6 +84,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const watchIdRef = useRef<number | null>(null);
   const sessionBlockedRef = useRef(false);
+  const firstTransmissionDoneRef = useRef(false);
   
   const volunteerId = useRef(localStorage.getItem('rt_vid') || Math.random().toString(36).substring(2, 15)).current;
 
@@ -112,9 +115,8 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
     localStorage.setItem('rt_queue', JSON.stringify(queue));
   }, [queue]);
 
-  const syncQueue = useCallback(async () => {
-    if (queue.length === 0 || !navigator.onLine) return;
-
+  const sendLocations = useCallback(async (locationsToSend: Location[]) => {
+    if (locationsToSend.length === 0 || !navigator.onLine) return false;
     try {
       const res = await fetch('/api/sync', {
         method: 'POST',
@@ -124,11 +126,11 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
           missionId,
           name,
           organization: org,
-          locations: queue
+          locations: locationsToSend
         })
       });
       if (res.ok) {
-        setQueue([]);
+        return true;
       } else if (res.status === 403 && !sessionBlockedRef.current) {
         sessionBlockedRef.current = true;
         const err = await res.json().catch(() => ({ error: "Trasmissione non consentita" }));
@@ -139,12 +141,21 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
     } catch (e) {
       console.error("Sync failed", e);
     }
-  }, [queue, volunteerId, missionId, name, org, stopTracking]);
+    return false;
+  }, [volunteerId, missionId, name, org, stopTracking]);
+
+  const syncQueue = useCallback(async () => {
+    if (queue.length === 0 || !navigator.onLine) return;
+    const sent = await sendLocations(queue);
+    if (sent) {
+      setQueue([]);
+    }
+  }, [queue, sendLocations]);
 
   useEffect(() => {
-    const interval = setInterval(syncQueue, 10000);
+    const interval = setInterval(syncQueue, SYNC_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [syncQueue]);
+  }, [syncQueue, SYNC_INTERVAL_MS]);
 
   useEffect(() => {
     return () => {
@@ -161,6 +172,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
     localStorage.setItem('rt_joined', 'true');
     setIsJoined(true);
     setIsTracking(true);
+    firstTransmissionDoneRef.current = false;
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
@@ -170,10 +182,22 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
           lng: pos.coords.longitude,
           timestamp: new Date().toISOString()
         };
+
+        if (!firstTransmissionDoneRef.current) {
+          firstTransmissionDoneRef.current = true;
+          void (async () => {
+            const sent = await sendLocations([newLoc]);
+            if (!sent) {
+              setQueue(prev => [...prev, newLoc]);
+            }
+          })();
+          return;
+        }
+
         setQueue(prev => [...prev, newLoc]);
       },
       (err) => console.error(err),
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 15000 }
     );
   };
 
@@ -240,7 +264,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
           </div>
           <div>
             <h3 className="text-lg font-bold text-zinc-900">Stai trasmettendo</h3>
-            <p className="text-sm text-zinc-500">Non chiudere questa pagina durante l'intervento.</p>
+            <p className="text-sm text-zinc-500">Prima posizione inviata subito, poi sincronizzazione ogni 60 secondi.</p>
           </div>
           {lastPos && (
             <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-100">
@@ -347,6 +371,11 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const exportVolunteerTrack = (volunteerId: string) => {
+    const exportUrl = `/api/missions/${missionId}/volunteers/${volunteerId}/tracks/export?format=csv`;
+    window.open(exportUrl, '_blank');
   };
 
   if (error) {
@@ -462,29 +491,38 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
                         <p className="text-[9px] text-zinc-400">{new Date(lastUpdate).toLocaleTimeString()}</p>
                       )}
                     </div>
-                    {!isDismissed && (
+                    <div className="flex flex-col gap-1">
                       <button
-                        onClick={() => {
-                          if (confirm(`Dismettere ${v.name} dalla trasmissione posizione?`)) {
-                            dismissVolunteer(v.id);
-                          }
-                        }}
-                        disabled={actionLoading === v.id}
-                        className={cn(
-                          "px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1",
-                          "border-red-200 text-red-600 hover:bg-red-50",
-                          actionLoading === v.id && "opacity-60 cursor-not-allowed"
-                        )}
+                        onClick={() => exportVolunteerTrack(v.id)}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold border border-zinc-200 text-zinc-600 hover:bg-zinc-100 flex items-center gap-1"
                       >
-                        <UserX size={12} />
-                        {actionLoading === v.id ? '...' : 'DISMETTI'}
+                        <Download size={12} />
+                        EXPORT
                       </button>
-                    )}
-                    {isDismissed && (
-                      <div className="px-2 py-1 rounded-lg text-[10px] font-bold border border-red-200 text-red-600 bg-red-50">
-                        DISMESSO
-                      </div>
-                    )}
+                      {!isDismissed && (
+                        <button
+                          onClick={() => {
+                            if (confirm(`Dismettere ${v.name} dalla trasmissione posizione?`)) {
+                              dismissVolunteer(v.id);
+                            }
+                          }}
+                          disabled={actionLoading === v.id}
+                          className={cn(
+                            "px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1",
+                            "border-red-200 text-red-600 hover:bg-red-50",
+                            actionLoading === v.id && "opacity-60 cursor-not-allowed"
+                          )}
+                        >
+                          <UserX size={12} />
+                          {actionLoading === v.id ? '...' : 'DISMETTI'}
+                        </button>
+                      )}
+                      {isDismissed && (
+                        <div className="px-2 py-1 rounded-lg text-[10px] font-bold border border-red-200 text-red-600 bg-red-50 text-center">
+                          DISMESSO
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}

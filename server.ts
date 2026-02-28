@@ -149,6 +149,58 @@ async function startServer() {
     return res.json({ success: true, dismissed });
   });
 
+  app.get("/api/missions/:id/volunteers/:volunteerId/tracks/export", (req, res) => {
+    const { id: missionId, volunteerId } = req.params;
+    const format = String(req.query.format || "csv").toLowerCase();
+
+    const volunteer = db
+      .prepare("SELECT id, name, organization FROM volunteers WHERE id = ? AND mission_id = ?")
+      .get(volunteerId, missionId) as { id: string; name: string; organization: string } | undefined;
+
+    if (!volunteer) {
+      return res.status(404).json({ error: "Volontario non trovato" });
+    }
+
+    const tracks = db
+      .prepare("SELECT lat, lng, timestamp FROM locations WHERE mission_id = ? AND volunteer_id = ? ORDER BY timestamp ASC")
+      .all(missionId, volunteerId) as Array<{ lat: number; lng: number; timestamp: string }>;
+
+    if (format === "json") {
+      return res.json({
+        missionId,
+        volunteer,
+        count: tracks.length,
+        tracks,
+      });
+    }
+
+    const escaped = (value: unknown) => {
+      const text = String(value ?? "").replace(/"/g, '""');
+      return `"${text}"`;
+    };
+
+    const rows = [
+      ["mission_id", "volunteer_id", "name", "organization", "lat", "lng", "timestamp"],
+      ...tracks.map((track) => [
+        missionId,
+        volunteer.id,
+        volunteer.name,
+        volunteer.organization,
+        track.lat,
+        track.lng,
+        track.timestamp,
+      ]),
+    ];
+
+    const csv = rows.map((row) => row.map(escaped).join(",")).join("\n");
+    const safeName = volunteer.name.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const filename = `tracce_${missionId}_${safeName || volunteer.id}.csv`;
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.status(200).send(csv);
+  });
+
   app.post("/api/sync", (req, res) => {
     const { volunteerId, missionId, name, organization, locations } = req.body;
 
