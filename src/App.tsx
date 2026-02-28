@@ -145,12 +145,25 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
   }, [volunteerId, missionId, name, org, stopTracking]);
 
   const syncQueue = useCallback(async () => {
-    if (queue.length === 0 || !navigator.onLine) return;
-    const sent = await sendLocations(queue);
-    if (sent) {
-      setQueue([]);
+    if (!navigator.onLine) return;
+
+    if (queue.length > 0) {
+      const sent = await sendLocations(queue);
+      if (sent) {
+        setQueue([]);
+      }
+      return;
     }
-  }, [queue, sendLocations]);
+
+    if (lastPos) {
+      const heartbeatLoc: Location = {
+        lat: lastPos.latitude,
+        lng: lastPos.longitude,
+        timestamp: new Date().toISOString()
+      };
+      await sendLocations([heartbeatLoc]);
+    }
+  }, [queue, sendLocations, lastPos]);
 
   useEffect(() => {
     const interval = setInterval(syncQueue, SYNC_INTERVAL_MS);
@@ -374,7 +387,7 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
   };
 
   const exportVolunteerTrack = (volunteerId: string) => {
-    const exportUrl = `/api/missions/${missionId}/volunteers/${volunteerId}/tracks/export?format=csv`;
+    const exportUrl = `/api/missions/${missionId}/volunteers/${volunteerId}/tracks/export?format=kml`;
     window.open(exportUrl, '_blank');
   };
 
@@ -477,21 +490,23 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
                     ? 'text-amber-600'
                     : 'text-emerald-600';
                 return (
-                  <div key={v.id} className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center gap-3">
-                    <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center border border-zinc-200 text-zinc-600">
-                      <User size={16} />
+                  <div key={v.id} className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex flex-col gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center border border-zinc-200 text-zinc-600">
+                        <User size={16} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-zinc-900 truncate">{v.name}</p>
+                        <p className="text-[10px] text-zinc-500 uppercase font-medium">{v.organization}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={cn("text-[10px] font-bold", statusColor)}>{statusLabel}</p>
+                        {lastUpdate && (
+                          <p className="text-[9px] text-zinc-400">{new Date(lastUpdate).toLocaleTimeString()}</p>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-zinc-900 truncate">{v.name}</p>
-                      <p className="text-[10px] text-zinc-500 uppercase font-medium">{v.organization}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className={cn("text-[10px] font-bold", statusColor)}>{statusLabel}</p>
-                      {lastUpdate && (
-                        <p className="text-[9px] text-zinc-400">{new Date(lastUpdate).toLocaleTimeString()}</p>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2 pl-11">
                       <button
                         onClick={() => exportVolunteerTrack(v.id)}
                         className="px-2 py-1 rounded-lg text-[10px] font-bold border border-zinc-200 text-zinc-600 hover:bg-zinc-100 flex items-center gap-1"

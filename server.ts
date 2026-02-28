@@ -151,7 +151,7 @@ async function startServer() {
 
   app.get("/api/missions/:id/volunteers/:volunteerId/tracks/export", (req, res) => {
     const { id: missionId, volunteerId } = req.params;
-    const format = String(req.query.format || "csv").toLowerCase();
+    const format = String(req.query.format || "kml").toLowerCase();
 
     const volunteer = db
       .prepare("SELECT id, name, organization FROM volunteers WHERE id = ? AND mission_id = ?")
@@ -174,31 +174,56 @@ async function startServer() {
       });
     }
 
-    const escaped = (value: unknown) => {
-      const text = String(value ?? "").replace(/"/g, '""');
-      return `"${text}"`;
-    };
+    if (format !== "kml") {
+      return res.status(400).json({ error: "Formato non supportato. Usa 'kml' o 'json'" });
+    }
 
-    const rows = [
-      ["mission_id", "volunteer_id", "name", "organization", "lat", "lng", "timestamp"],
-      ...tracks.map((track) => [
-        missionId,
-        volunteer.id,
-        volunteer.name,
-        volunteer.organization,
-        track.lat,
-        track.lng,
-        track.timestamp,
-      ]),
-    ];
+    const escapeXml = (value: unknown) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&apos;");
 
-    const csv = rows.map((row) => row.map(escaped).join(",")).join("\n");
+    const coordinates = tracks.map((track) => `${track.lng},${track.lat},0`).join("\n");
+    const pointPlacemarks = tracks
+      .map(
+        (track, index) => `
+    <Placemark>
+      <name>Punto ${index + 1}</name>
+      <description>${escapeXml(track.timestamp)}</description>
+      <Point>
+        <coordinates>${track.lng},${track.lat},0</coordinates>
+      </Point>
+    </Placemark>`
+      )
+      .join("");
+
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Tracce ${escapeXml(volunteer.name)} - Missione ${escapeXml(missionId)}</name>
+    <description>Export tracce RescueTrack</description>
+    <Placemark>
+      <name>Percorso ${escapeXml(volunteer.name)}</name>
+      <description>${escapeXml(volunteer.organization || "")}</description>
+      <LineString>
+        <tessellate>1</tessellate>
+        <coordinates>
+${coordinates}
+        </coordinates>
+      </LineString>
+    </Placemark>${pointPlacemarks}
+  </Document>
+</kml>`;
+
     const safeName = volunteer.name.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const filename = `tracce_${missionId}_${safeName || volunteer.id}.csv`;
+    const filename = `tracce_${missionId}_${safeName || volunteer.id}.kml`;
 
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Type", "application/vnd.google-earth.kml+xml; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    return res.status(200).send(csv);
+    return res.status(200).send(kml);
   });
 
   app.post("/api/sync", (req, res) => {

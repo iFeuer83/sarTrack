@@ -11,7 +11,7 @@ Applicazione web per il tracciamento GPS in tempo reale dei volontari durante op
 - 🛠️ Controlli missione: apertura/chiusura intervento e dismissione volontari.
 - 🚦 Stato volontari in dashboard: verde (trasmette), arancione (fermo), rosso (dismesso).
 - 🔄 Invio posizione: prima posizione immediata, poi sincronizzazione periodica ogni 60 secondi.
-- 📤 Export tracce: esportazione CSV delle tracce per singolo volontario dalla dashboard.
+- 📤 Export tracce: esportazione KML delle tracce per singolo volontario dalla dashboard.
 - 📦 Database locale SQLite.
 
 ## Requisiti
