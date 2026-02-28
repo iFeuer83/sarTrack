@@ -53,6 +53,7 @@ function ensureColumn(table: string, column: string, definition: string) {
 }
 
 ensureColumn("missions", "active", "INTEGER DEFAULT 1");
+ensureColumn("missions", "archived", "INTEGER DEFAULT 0");
 ensureColumn("volunteers", "dismissed", "INTEGER DEFAULT 0");
 ensureColumn("volunteers", "dismissed_at", "DATETIME");
 
@@ -78,9 +79,34 @@ async function startServer() {
 
   app.post("/api/missions", (req, res) => {
     const { name } = req.body;
+    if (!name || typeof name !== "string") {
+      return res.status(400).json({ error: "Nome missione non valido" });
+    }
     const id = Math.random().toString(36).substring(2, 9).toUpperCase();
-    db.prepare("INSERT INTO missions (id, name) VALUES (?, ?)").run(id, name);
+    db.prepare("INSERT INTO missions (id, name, active, archived) VALUES (?, ?, 1, 0)").run(id, name.trim());
     res.json({ id, name });
+  });
+
+  app.get("/api/missions", (req, res) => {
+    try {
+      const includeArchived = String(req.query.includeArchived || "0") === "1";
+      const missions = db
+        .prepare(`
+          SELECT
+            m.*,
+            (SELECT COUNT(*) FROM volunteers v WHERE v.mission_id = m.id) as volunteer_count,
+            (SELECT MAX(timestamp) FROM locations l WHERE l.mission_id = m.id) as last_location_at
+          FROM missions m
+          WHERE (? = 1 OR COALESCE(m.archived, 0) = 0)
+          ORDER BY datetime(m.created_at) DESC
+        `)
+        .all(includeArchived ? 1 : 0);
+
+      return res.json({ missions });
+    } catch (error) {
+      console.error("Error listing missions:", error);
+      return res.status(500).json({ error: "Errore interno del server" });
+    }
   });
 
   app.get("/api/missions/:id", (req, res) => {
@@ -122,6 +148,24 @@ async function startServer() {
 
     io.to(`mission:${req.params.id}`).emit("update", { type: "mission-status", active });
     return res.json({ success: true, active });
+  });
+
+  app.patch("/api/missions/:id/archive", (req, res) => {
+    const { archived } = req.body;
+    if (typeof archived !== "boolean") {
+      return res.status(400).json({ error: "Valore archived non valido" });
+    }
+
+    const update = db
+      .prepare("UPDATE missions SET archived = ?, active = CASE WHEN ? = 1 THEN 0 ELSE active END WHERE id = ?")
+      .run(archived ? 1 : 0, archived ? 1 : 0, req.params.id);
+
+    if (update.changes === 0) {
+      return res.status(404).json({ error: "Missione non trovata" });
+    }
+
+    io.to(`mission:${req.params.id}`).emit("update", { type: "mission-archive", archived });
+    return res.json({ success: true, archived });
   });
 
   app.patch("/api/missions/:id/volunteers/:volunteerId/dismiss", (req, res) => {
@@ -229,9 +273,12 @@ ${coordinates}
   app.post("/api/sync", (req, res) => {
     const { volunteerId, missionId, name, organization, locations } = req.body;
 
-    const mission = db.prepare("SELECT id, active FROM missions WHERE id = ?").get(missionId) as { id: string; active: number } | undefined;
+    const mission = db.prepare("SELECT id, active, COALESCE(archived, 0) as archived FROM missions WHERE id = ?").get(missionId) as { id: string; active: number; archived: number } | undefined;
     if (!mission) {
       return res.status(404).json({ error: "Missione non trovata" });
+    }
+    if (mission.archived === 1) {
+      return res.status(403).json({ error: "Missione archiviata: trasmissione non consentita" });
     }
     if (mission.active !== 1) {
       return res.status(403).json({ error: "Missione chiusa: trasmissione non consentita" });

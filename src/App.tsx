@@ -5,7 +5,13 @@ import { QRCodeSVG } from 'qrcode.react';
 import { 
   Map as MapIcon, 
   Users, 
-  Plus, 
+  Plus,
+  Printer,
+  ArrowLeft,
+  LayoutDashboard,
+  FolderArchive,
+  FolderOpen,
+  LogOut,
   QrCode, 
   Navigation, 
   Wifi, 
@@ -50,6 +56,10 @@ interface Mission {
   id: string;
   name: string;
   active: number;
+  archived?: number;
+  created_at?: string;
+  volunteer_count?: number;
+  last_location_at?: string | null;
 }
 
 // --- Components ---
@@ -323,7 +333,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
 };
 
 // --- Coordinator View ---
-const CoordinatorView = ({ missionId }: { missionId: string }) => {
+const CoordinatorView = ({ missionId, onBack }: { missionId: string; onBack: () => void }) => {
   const [data, setData] = useState<{ mission: Mission; volunteers: Volunteer[]; locations: any[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<'mission' | string | null>(null);
@@ -399,6 +409,10 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
     window.open(exportUrl, '_blank');
   };
 
+  const openPrintMissionQr = () => {
+    window.open(`?print=${missionId}`, '_blank');
+  };
+
   if (error) {
     return (
       <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6 text-center">
@@ -438,6 +452,14 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Sidebar */}
         <div className="w-full lg:w-80 border-r border-zinc-200 bg-white overflow-y-auto p-4 space-y-6">
+          <button
+            onClick={onBack}
+            className="w-full py-2.5 rounded-xl border border-zinc-200 text-zinc-700 text-sm font-semibold hover:bg-zinc-50 flex items-center justify-center gap-2"
+          >
+            <ArrowLeft size={16} />
+            Torna a Dashboard
+          </button>
+
           <section className="space-y-3">
             <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
               <Shield size={14} /> Stato Intervento
@@ -478,6 +500,13 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
             <Card className="p-4 flex flex-col items-center gap-3 bg-zinc-50 border-dashed">
               <QRCodeSVG value={joinUrl} size={150} />
               <p className="text-[10px] text-zinc-400 text-center break-all">{joinUrl}</p>
+              <button
+                onClick={openPrintMissionQr}
+                className="w-full py-2 rounded-lg text-xs font-bold bg-zinc-900 text-white hover:bg-zinc-700 flex items-center justify-center gap-2"
+              >
+                <Printer size={14} />
+                Stampa QR in PDF
+              </button>
             </Card>
           </section>
 
@@ -585,7 +614,7 @@ const CoordinatorView = ({ missionId }: { missionId: string }) => {
   );
 };
 
-const AdminLoginView = ({ missionId, onSuccess }: { missionId: string; onSuccess: () => void }) => {
+const AdminLoginView = ({ onSuccess }: { onSuccess: () => void }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -621,8 +650,8 @@ const AdminLoginView = ({ missionId, onSuccess }: { missionId: string; onSuccess
             <div className="w-14 h-14 mx-auto rounded-2xl bg-red-50 text-red-600 flex items-center justify-center">
               <Lock size={26} />
             </div>
-            <h2 className="text-2xl font-black text-zinc-900">Accesso Admin</h2>
-            <p className="text-sm text-zinc-500">Inserisci password dashboard per missione <span className="font-mono font-bold">{missionId}</span></p>
+            <h2 className="text-2xl font-black text-zinc-900">Accesso Dashboard</h2>
+            <p className="text-sm text-zinc-500">Accedi alla gestione ricerche</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm font-semibold text-zinc-700">Password</label>
@@ -649,10 +678,242 @@ const AdminLoginView = ({ missionId, onSuccess }: { missionId: string; onSuccess
               loading && "opacity-60 cursor-not-allowed"
             )}
           >
-            {loading ? 'Verifica in corso...' : 'Accedi alla Dashboard'}
+            {loading ? 'Verifica in corso...' : 'Entra in Dashboard'}
           </button>
         </Card>
       </div>
+    </div>
+  );
+};
+
+const AdminDashboardView = ({
+  onOpenMission,
+  onLogout,
+}: {
+  onOpenMission: (missionId: string) => void;
+  onLogout: () => void;
+}) => {
+  const [missions, setMissions] = useState<Mission[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [includeArchived, setIncludeArchived] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const fetchMissions = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/missions?includeArchived=${includeArchived ? '1' : '0'}`);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Errore caricando missioni');
+      }
+      const json = await res.json();
+      setMissions(json.missions || []);
+      setError(null);
+    } catch (e: any) {
+      setError(e.message || 'Errore caricando missioni');
+    } finally {
+      setLoading(false);
+    }
+  }, [includeArchived]);
+
+  useEffect(() => {
+    fetchMissions();
+  }, [fetchMissions]);
+
+  const createMission = async () => {
+    const name = prompt("Nome della ricerca/intervento");
+    if (!name) return;
+    setActionLoading('create');
+    try {
+      const res = await fetch('/api/missions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Errore creando ricerca');
+      }
+      await fetchMissions();
+    } catch (e: any) {
+      alert(e.message || 'Errore creando ricerca');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const archiveMission = async (mission: Mission, archived: boolean) => {
+    setActionLoading(`archive:${mission.id}`);
+    try {
+      const res = await fetch(`/api/missions/${mission.id}/archive`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ archived })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Errore aggiornando archivio');
+      }
+      await fetchMissions();
+    } catch (e: any) {
+      alert(e.message || 'Errore aggiornando archivio');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const openPrintMissionQr = (missionId: string) => {
+    window.open(`?print=${missionId}`, '_blank');
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-50">
+      <Header title="Dashboard Ricerche" subtitle="Gestione Admin" icon={LayoutDashboard} />
+      <main className="max-w-5xl mx-auto p-6 space-y-6">
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={createMission}
+            disabled={actionLoading === 'create'}
+            className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700 flex items-center gap-2"
+          >
+            <Plus size={16} />
+            {actionLoading === 'create' ? 'Creazione...' : 'Nuova Ricerca'}
+          </button>
+          <button
+            onClick={() => setIncludeArchived(v => !v)}
+            className="px-4 py-2.5 rounded-xl border border-zinc-200 bg-white text-zinc-700 text-sm font-semibold hover:bg-zinc-50"
+          >
+            {includeArchived ? 'Nascondi Archiviate' : 'Mostra Archiviate'}
+          </button>
+          <button
+            onClick={onLogout}
+            className="ml-auto px-4 py-2.5 rounded-xl border border-zinc-200 bg-white text-zinc-700 text-sm font-semibold hover:bg-zinc-50 flex items-center gap-2"
+          >
+            <LogOut size={16} />
+            Esci
+          </button>
+        </div>
+
+        {error && (
+          <Card className="p-4 border-red-200 bg-red-50 text-red-700 text-sm font-semibold">
+            {error}
+          </Card>
+        )}
+
+        {loading ? (
+          <Card className="p-6 text-zinc-500 text-sm">Caricamento ricerche...</Card>
+        ) : (
+          <div className="space-y-3">
+            {missions.map((mission) => {
+              const isArchived = mission.archived === 1;
+              const isActive = mission.active === 1 && !isArchived;
+              return (
+                <Card key={mission.id} className="p-4">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-bold text-zinc-900 truncate">{mission.name}</h3>
+                        <p className="text-xs text-zinc-500">Codice: <span className="font-mono font-semibold">{mission.id}</span></p>
+                        {mission.created_at && (
+                          <p className="text-[11px] text-zinc-400">Creata: {new Date(mission.created_at).toLocaleString()}</p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className={cn(
+                          "text-[11px] font-bold",
+                          isArchived ? 'text-zinc-500' : isActive ? 'text-emerald-600' : 'text-amber-600'
+                        )}>
+                          {isArchived ? 'ARCHIVIATA' : isActive ? 'APERTA' : 'CHIUSA'}
+                        </p>
+                        <p className="text-[11px] text-zinc-400">Volontari: {mission.volunteer_count ?? 0}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => onOpenMission(mission.id)}
+                        className="px-3 py-2 rounded-lg text-xs font-bold bg-zinc-900 text-white hover:bg-zinc-700"
+                      >
+                        Apri Dashboard
+                      </button>
+                      <button
+                        onClick={() => openPrintMissionQr(mission.id)}
+                        className="px-3 py-2 rounded-lg text-xs font-bold border border-zinc-200 text-zinc-700 hover:bg-zinc-50 flex items-center gap-1"
+                      >
+                        <Printer size={13} />
+                        Stampa QR PDF
+                      </button>
+                      <button
+                        onClick={() => archiveMission(mission, !isArchived)}
+                        disabled={actionLoading === `archive:${mission.id}`}
+                        className={cn(
+                          "px-3 py-2 rounded-lg text-xs font-bold border flex items-center gap-1",
+                          isArchived
+                            ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                            : "border-amber-200 text-amber-700 hover:bg-amber-50",
+                          actionLoading === `archive:${mission.id}` && "opacity-60 cursor-not-allowed"
+                        )}
+                      >
+                        {isArchived ? <FolderOpen size={13} /> : <FolderArchive size={13} />}
+                        {isArchived ? 'Ripristina' : 'Archivia'}
+                      </button>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+
+            {missions.length === 0 && (
+              <Card className="p-6 text-sm text-zinc-500 text-center">
+                Nessuna ricerca disponibile.
+              </Card>
+            )}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+};
+
+const PrintQrView = ({ missionId }: { missionId: string }) => {
+  const [missionName, setMissionName] = useState<string>(missionId);
+  const joinUrl = `${window.location.origin}?m=${missionId}`;
+
+  useEffect(() => {
+    const loadMission = async () => {
+      try {
+        const res = await fetch(`/api/missions/${missionId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.mission?.name) {
+            setMissionName(data.mission.name);
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    loadMission();
+  }, [missionId]);
+
+  return (
+    <div className="min-h-screen bg-white p-6 flex flex-col items-center justify-center gap-6">
+      <div className="text-center space-y-2">
+        <h1 className="text-3xl font-black text-zinc-900">{missionName}</h1>
+        <p className="text-sm text-zinc-500">Scansiona per partecipare alla ricerca</p>
+      </div>
+      <div className="p-6 border-2 border-zinc-300 rounded-2xl bg-white">
+        <QRCodeSVG value={joinUrl} size={320} />
+      </div>
+      <p className="text-xs text-zinc-400 break-all text-center max-w-md">{joinUrl}</p>
+      <button
+        onClick={() => window.print()}
+        className="print:hidden px-5 py-3 rounded-xl bg-zinc-900 text-white text-sm font-bold flex items-center gap-2"
+      >
+        <Printer size={16} />
+        Stampa / Salva PDF
+      </button>
     </div>
   );
 };
@@ -670,7 +931,7 @@ function MapUpdater({ locations }: { locations: any[] }) {
 
 // --- Main App ---
 export default function App() {
-  const [view, setView] = useState<'home' | 'coordinator' | 'volunteer'>('home');
+  const [view, setView] = useState<'landing' | 'admin' | 'coordinator' | 'volunteer' | 'print-qr'>('landing');
   const [missionId, setMissionId] = useState<string | null>(null);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(sessionStorage.getItem('rt_admin_auth') === 'true');
 
@@ -678,85 +939,69 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const m = params.get('m');
     const c = params.get('c');
+    const printId = params.get('print');
     if (m) {
       setMissionId(m);
       setView('volunteer');
+    } else if (printId) {
+      setMissionId(printId);
+      setView('print-qr');
     } else if (c) {
       setMissionId(c);
       setView('coordinator');
+    } else if (sessionStorage.getItem('rt_admin_auth') === 'true') {
+      setView('admin');
     }
   }, []);
 
-  const createMission = async () => {
-    const name = prompt("Nome dell'intervento (es: Ricerca Persona Scomparsa)");
-    if (!name) return;
-    const res = await fetch('/api/missions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      window.location.href = `?c=${data.id}`;
+  const handleAdminSuccess = () => {
+    setIsAdminAuthenticated(true);
+    if (view === 'coordinator' && missionId) {
+      window.history.replaceState({}, '', `?c=${missionId}`);
+      return;
     }
+    setView('admin');
+    window.history.replaceState({}, '', '/');
   };
 
   if (view === 'volunteer' && missionId) return <VolunteerView missionId={missionId} />;
-  if (view === 'coordinator' && missionId) {
-    if (!isAdminAuthenticated) {
-      return <AdminLoginView missionId={missionId} onSuccess={() => setIsAdminAuthenticated(true)} />;
-    }
-    return <CoordinatorView missionId={missionId} />;
+  if (view === 'print-qr' && missionId) return <PrintQrView missionId={missionId} />;
+
+  if (!isAdminAuthenticated) {
+    return <AdminLoginView onSuccess={handleAdminSuccess} />;
   }
 
-  return (
-    <div className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center p-6">
-      <div className="max-w-md w-full space-y-8 text-center">
-        <div className="space-y-4">
-          <div className="w-24 h-24 bg-red-600 rounded-3xl flex items-center justify-center mx-auto shadow-2xl shadow-red-200 transform rotate-12">
-            <Shield className="text-white" size={48} />
-          </div>
-          <h1 className="text-4xl font-black text-zinc-900 tracking-tight">RescueTrack</h1>
-          <p className="text-zinc-500 font-medium">Sistema di coordinamento e tracciamento per squadre di ricerca.</p>
-        </div>
+  if (view === 'admin') {
+    return (
+      <AdminDashboardView
+        onOpenMission={(id) => {
+          setMissionId(id);
+          setView('coordinator');
+          window.history.replaceState({}, '', `?c=${id}`);
+        }}
+        onLogout={() => {
+          sessionStorage.removeItem('rt_admin_auth');
+          setIsAdminAuthenticated(false);
+          setMissionId(null);
+          setView('landing');
+          window.history.replaceState({}, '', '/');
+        }}
+      />
+    );
+  }
 
-        <div className="grid gap-4">
-          <button 
-            onClick={createMission}
-            className="group bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm hover:border-red-500 transition-all text-left flex items-center gap-4"
-          >
-            <div className="p-3 bg-red-50 rounded-xl text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors">
-              <Plus size={24} />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-bold text-zinc-900">Nuovo Intervento</h3>
-              <p className="text-xs text-zinc-400">Crea una sessione e genera il QR Code</p>
-            </div>
-            <ChevronRight className="text-zinc-300" size={20} />
-          </button>
+  if (view === 'coordinator' && missionId) {
+    return (
+      <CoordinatorView
+        missionId={missionId}
+        onBack={() => {
+          setMissionId(null);
+          setView('admin');
+          window.history.replaceState({}, '', '/');
+        }}
+      />
+    );
+  }
 
-          <button 
-            onClick={() => {
-              const id = prompt("Inserisci il codice missione");
-              if(id) window.location.href = `?c=${id}`;
-            }}
-            className="group bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm hover:border-zinc-400 transition-all text-left flex items-center gap-4"
-          >
-            <div className="p-3 bg-zinc-50 rounded-xl text-zinc-600 group-hover:bg-zinc-900 group-hover:text-white transition-colors">
-              <MapIcon size={24} />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-bold text-zinc-900">Accedi a Dashboard</h3>
-              <p className="text-xs text-zinc-400">Visualizza la mappa di un intervento esistente</p>
-            </div>
-            <ChevronRight className="text-zinc-300" size={20} />
-          </button>
-        </div>
-
-        <div className="pt-8 text-[10px] text-zinc-400 uppercase font-bold tracking-widest">
-          Sviluppato per Vigili del Fuoco & Volontari
-        </div>
-      </div>
-    </div>
-  );
+  return <AdminLoginView onSuccess={handleAdminSuccess} />;
 }

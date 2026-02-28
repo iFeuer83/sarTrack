@@ -8,6 +8,8 @@ Applicazione web per il tracciamento GPS in tempo reale dei volontari durante op
 - 📱 Accesso rapido tramite QR Code per i volontari.
 - 🗺️ Dashboard coordinatore con mappa interattiva (Leaflet).
 - 🔐 Accesso dashboard admin con password (default: `test2026`).
+- 🛠️ Dashboard admin: creazione ricerche, archivio/ripristino, apertura dashboard missione.
+- 🧾 Stampa QR in PDF con nome ricerca per affissione.
 - 🛠️ Controlli missione: apertura/chiusura intervento e dismissione volontari.
 - 🚦 Stato volontari in dashboard: verde (trasmette), arancione (fermo), rosso (dismesso).
 - 🔄 Invio posizione: prima posizione immediata, poi sincronizzazione periodica ogni 60 secondi.
