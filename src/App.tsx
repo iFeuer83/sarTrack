@@ -95,20 +95,20 @@ const Card = ({ children, className }: { children: ReactNode; className?: string
 // --- Volunteer View ---
 const VolunteerView = ({ missionId }: { missionId: string }) => {
   const SYNC_INTERVAL_MS = 60_000;
-  const [name, setName] = useState(localStorage.getItem('rt_name') || '');
-  const [org, setOrg] = useState(localStorage.getItem('rt_org') || '');
-  const [isJoined, setIsJoined] = useState(!!localStorage.getItem('rt_joined'));
+  const [name, setName] = useState('');
+  const [org, setOrg] = useState('');
+  const [isJoined, setIsJoined] = useState(false);
   const [isTracking, setIsTracking] = useState(false);
   const [lastPos, setLastPos] = useState<GeolocationCoordinates | null>(null);
-  const [queue, setQueue] = useState<Location[]>(JSON.parse(localStorage.getItem('rt_queue') || '[]'));
+  const [queue, setQueue] = useState<Location[]>([]);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const watchIdRef = useRef<number | null>(null);
   const sessionBlockedRef = useRef(false);
   const firstTransmissionDoneRef = useRef(false);
-  const queueRef = useRef<Location[]>(JSON.parse(localStorage.getItem('rt_queue') || '[]'));
+  const queueRef = useRef<Location[]>([]);
   const lastPosRef = useRef<GeolocationCoordinates | null>(null);
   
-  const volunteerId = useRef(localStorage.getItem('rt_vid') || Math.random().toString(36).substring(2, 15)).current;
+  const volunteerId = useRef(Math.random().toString(36).substring(2, 15)).current;
 
   const stopTracking = useCallback((removeJoined = false) => {
     if (watchIdRef.current !== null) {
@@ -122,7 +122,6 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('rt_vid', volunteerId);
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
@@ -134,7 +133,6 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('rt_queue', JSON.stringify(queue));
     queueRef.current = queue;
   }, [queue]);
 
@@ -207,9 +205,6 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
 
   const startTracking = () => {
     if (!name) return alert("Inserisci il tuo nome");
-    localStorage.setItem('rt_name', name);
-    localStorage.setItem('rt_org', org);
-    localStorage.setItem('rt_joined', 'true');
     setIsJoined(true);
     setIsTracking(true);
     firstTransmissionDoneRef.current = false;
@@ -329,7 +324,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
         <button 
           onClick={() => {
             if(confirm("Sei sicuro di voler interrompere il tracciamento?")) {
-              stopTracking(true);
+              stopTracking(false);
               window.location.reload();
             }
           }}
