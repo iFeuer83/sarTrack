@@ -14,6 +14,7 @@ Applicazione web per il tracciamento GPS in tempo reale dei volontari durante op
 - 🚦 Stato volontari in dashboard: verde (trasmette), arancione (fermo), rosso (dismesso).
 - 🔄 Invio posizione: prima posizione immediata, poi sincronizzazione periodica ogni 60 secondi.
 - 📤 Export tracce: esportazione KML delle tracce per singolo volontario dalla dashboard.
+- 🗃️ Export archivio ricerca in JSON (missione + volontari + posizioni) dalla dashboard admin.
 - 📦 Database locale SQLite.
 
 ## Requisiti
@@ -52,8 +53,12 @@ Applicazione web per il tracciamento GPS in tempo reale dei volontari durante op
 4. Configura il servizio:
    - **Runtime**: `Node`
    - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `node server.ts`
-5. (Opzionale) Per non perdere i dati al riavvio, aggiungi un **Disk** (Volume) nelle impostazioni di Render e punta alla cartella dove risiede `rescue.db`.
+   - **Start Command**: `npm start`
+5. Per non perdere i dati al riavvio, aggiungi un **Disk** (Volume) nelle impostazioni di Render.
+6. Configura variabile ambiente:
+   - **Key**: `DATABASE_PATH`
+   - **Value**: `/var/data/rescue.db`
+   - (il Disk va montato su `/var/data`)
 
 ## Note sulla Privacy e Sicurezza
 - Password admin predefinita: `test2026`.

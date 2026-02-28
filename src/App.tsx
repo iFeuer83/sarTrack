@@ -772,6 +772,10 @@ const AdminDashboardView = ({
     window.open(`?print=${missionId}`, '_blank');
   };
 
+  const exportMissionArchive = (missionId: string) => {
+    window.open(`/api/missions/${missionId}/export`, '_blank');
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50">
       <Header title="Dashboard Ricerche" subtitle="Gestione Admin" icon={LayoutDashboard} />
@@ -848,6 +852,13 @@ const AdminDashboardView = ({
                       >
                         <Printer size={13} />
                         Stampa QR PDF
+                      </button>
+                      <button
+                        onClick={() => exportMissionArchive(mission.id)}
+                        className="px-3 py-2 rounded-lg text-xs font-bold border border-zinc-200 text-zinc-700 hover:bg-zinc-50 flex items-center gap-1"
+                      >
+                        <Download size={13} />
+                        Export Archivio JSON
                       </button>
                       <button
                         onClick={() => archiveMission(mission, !isArchived)}

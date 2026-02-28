@@ -3,15 +3,23 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath = path.resolve(__dirname, "rescue.db");
+const defaultDbPath = path.resolve(__dirname, "data", "rescue.db");
+const dbPath = process.env.DATABASE_PATH?.trim()
+  ? path.resolve(process.env.DATABASE_PATH)
+  : defaultDbPath;
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 console.log(`Initializing database at: ${dbPath}`);
 const db = new Database(dbPath);
+db.pragma("journal_mode = WAL");
+db.pragma("synchronous = NORMAL");
+db.pragma("busy_timeout = 5000");
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "test2026";
 
 // Initialize DB
@@ -132,6 +140,38 @@ async function startServer() {
     } catch (error) {
       console.error("Error fetching mission:", error);
       res.status(500).json({ error: "Errore interno del server" });
+    }
+  });
+
+  app.get("/api/missions/:id/export", (req, res) => {
+    try {
+      const mission = db.prepare("SELECT * FROM missions WHERE id = ?").get(req.params.id);
+      if (!mission) {
+        return res.status(404).json({ error: "Missione non trovata" });
+      }
+
+      const volunteers = db
+        .prepare("SELECT * FROM volunteers WHERE mission_id = ? ORDER BY name ASC")
+        .all(req.params.id);
+
+      const locations = db
+        .prepare("SELECT * FROM locations WHERE mission_id = ? ORDER BY timestamp ASC")
+        .all(req.params.id);
+
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        mission,
+        volunteers,
+        locations,
+      };
+
+      const safeMissionId = String(req.params.id).replace(/[^a-zA-Z0-9_-]/g, "_");
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="archive_${safeMissionId}.json"`);
+      return res.status(200).send(JSON.stringify(payload, null, 2));
+    } catch (error) {
+      console.error("Error exporting mission archive:", error);
+      return res.status(500).json({ error: "Errore interno del server" });
     }
   });
 
