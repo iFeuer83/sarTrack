@@ -607,7 +607,7 @@ const CoordinatorView = ({ missionId, onBack }: { missionId: string; onBack: () 
                         className="px-2 py-1 rounded-lg text-[10px] font-bold border border-zinc-200 text-zinc-600 hover:bg-zinc-100 flex items-center gap-1"
                       >
                         <Download size={12} />
-                        EXPORT
+                        TRACCIA KML
                       </button>
                       {!isDismissed && (
                         <button

@@ -45,6 +45,7 @@ export default defineConfig(({mode}) => {
           globPatterns: ['**/*.{js,css,html,png,svg,ico}'],
           cleanupOutdatedCaches: true,
           navigateFallback: '/index.html',
+          navigateFallbackDenylist: [/^\/api\//],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/tile\.openstreetmap\.org\/.*/i,
