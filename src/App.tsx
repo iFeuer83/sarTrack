@@ -65,16 +65,22 @@ interface Mission {
 
 // --- Components ---
 
+const LogoBanner = ({ className }: { className?: string }) => (
+  <div className={cn("w-full max-w-xl h-24 bg-white border border-zinc-200 rounded-2xl p-3 flex items-center justify-center", className)}>
+    <img src={logo} alt="RescueTrack logo" className="w-full h-full object-contain" />
+  </div>
+);
+
 const Header = ({ title, subtitle, icon: Icon }: { title: string; subtitle?: string; icon?: any }) => (
   <header className="bg-white border-bottom border-zinc-200 p-4 sticky top-0 z-50">
-    <div className="max-w-7xl mx-auto flex items-center gap-3">
-      <div className="w-10 h-10 bg-white rounded-lg border border-zinc-200 flex items-center justify-center p-1 overflow-hidden">
-        <img src={logo} alt="RescueTrack logo" className="w-full h-full object-contain" />
-      </div>
-      {Icon && <div className="p-2 bg-red-50 rounded-lg text-red-600"><Icon size={24} /></div>}
-      <div>
-        <h1 className="text-xl font-bold text-zinc-900 tracking-tight">{title}</h1>
-        {subtitle && <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">{subtitle}</p>}
+    <div className="max-w-7xl mx-auto space-y-3">
+      <LogoBanner className="mx-auto" />
+      <div className="flex items-center gap-3">
+        {Icon && <div className="p-2 bg-red-50 rounded-lg text-red-600"><Icon size={24} /></div>}
+        <div>
+          <h1 className="text-xl font-bold text-zinc-900 tracking-tight">{title}</h1>
+          {subtitle && <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">{subtitle}</p>}
+        </div>
       </div>
     </div>
   </header>
@@ -651,9 +657,7 @@ const AdminLoginView = ({ onSuccess }: { onSuccess: () => void }) => {
       <div className="max-w-md w-full">
         <Card className="p-6 space-y-5">
           <div className="text-center space-y-2">
-            <div className="w-20 h-20 mx-auto rounded-2xl bg-white border border-zinc-200 p-2 flex items-center justify-center">
-              <img src={logo} alt="RescueTrack logo" className="w-full h-full object-contain" />
-            </div>
+            <LogoBanner className="mx-auto max-w-md h-28" />
             <div className="w-14 h-14 mx-auto rounded-2xl bg-red-50 text-red-600 flex items-center justify-center">
               <Lock size={26} />
             </div>
@@ -906,9 +910,7 @@ const PrintQrView = ({ missionId }: { missionId: string }) => {
   return (
     <div className="min-h-screen bg-white p-6 flex flex-col items-center justify-center gap-6">
       <div className="text-center space-y-2">
-        <div className="w-24 h-24 mx-auto rounded-2xl bg-white border border-zinc-200 p-3 flex items-center justify-center">
-          <img src={logo} alt="RescueTrack logo" className="w-full h-full object-contain" />
-        </div>
+        <LogoBanner className="mx-auto max-w-2xl h-28" />
         <h1 className="text-3xl font-black text-zinc-900">{missionName}</h1>
         <p className="text-sm text-zinc-500">Scansiona per partecipare alla ricerca</p>
       </div>
