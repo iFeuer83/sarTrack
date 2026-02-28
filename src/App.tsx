@@ -95,6 +95,7 @@ const Card = ({ children, className }: { children: ReactNode; className?: string
 // --- Volunteer View ---
 const VolunteerView = ({ missionId }: { missionId: string }) => {
   const SYNC_INTERVAL_MS = 60_000;
+  const POSITION_FALLBACK_MS = 45_000;
   const [name, setName] = useState('');
   const [org, setOrg] = useState('');
   const [isJoined, setIsJoined] = useState(false);
@@ -107,6 +108,8 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
   const firstTransmissionDoneRef = useRef(false);
   const queueRef = useRef<Location[]>([]);
   const lastPosRef = useRef<GeolocationCoordinates | null>(null);
+  const fallbackPollRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<any>(null);
   
   const volunteerId = useRef(Math.random().toString(36).substring(2, 15)).current;
 
@@ -114,6 +117,14 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
     if (watchIdRef.current !== null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
+    }
+    if (fallbackPollRef.current !== null) {
+      window.clearInterval(fallbackPollRef.current);
+      fallbackPollRef.current = null;
+    }
+    if (wakeLockRef.current && typeof wakeLockRef.current.release === 'function') {
+      void wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
     }
     setIsTracking(false);
     if (removeJoined) {
@@ -200,6 +211,12 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
+      if (fallbackPollRef.current !== null) {
+        window.clearInterval(fallbackPollRef.current);
+      }
+      if (wakeLockRef.current && typeof wakeLockRef.current.release === 'function') {
+        void wakeLockRef.current.release().catch(() => {});
+      }
     };
   }, []);
 
@@ -208,6 +225,14 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
     setIsJoined(true);
     setIsTracking(true);
     firstTransmissionDoneRef.current = false;
+
+    if ('wakeLock' in navigator && (navigator as any).wakeLock?.request) {
+      void (navigator as any).wakeLock.request('screen')
+        .then((lock: any) => {
+          wakeLockRef.current = lock;
+        })
+        .catch(() => {});
+    }
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
@@ -235,6 +260,23 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
       (err) => console.error(err),
       { enableHighAccuracy: false, timeout: 10000, maximumAge: 15000 }
     );
+
+    fallbackPollRef.current = window.setInterval(() => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setLastPos(pos.coords);
+          lastPosRef.current = pos.coords;
+          const fallbackLoc = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            timestamp: new Date().toISOString()
+          };
+          setQueue(prev => [...prev, fallbackLoc]);
+        },
+        (err) => console.error(err),
+        { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 }
+      );
+    }, POSITION_FALLBACK_MS);
   };
 
   if (!isJoined) {
@@ -300,7 +342,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
           </div>
           <div>
             <h3 className="text-lg font-bold text-zinc-900">Stai trasmettendo</h3>
-            <p className="text-sm text-zinc-500">Prima posizione inviata subito, poi sincronizzazione ogni 60 secondi.</p>
+            <p className="text-sm text-zinc-500">Prima posizione inviata subito, poi sincronizzazione ogni 60 secondi con fallback GPS periodico.</p>
           </div>
           {lastPos && (
             <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-100">
@@ -365,7 +407,18 @@ const CoordinatorView = ({ missionId, onBack }: { missionId: string; onBack: () 
     const s = io();
     s.emit('join-mission', missionId);
     s.on('update', () => fetchData());
-    return () => { s.disconnect(); };
+    s.on('connect_error', () => {
+      console.warn('Socket reconnect in progress');
+    });
+
+    const pollingInterval = window.setInterval(() => {
+      void fetchData();
+    }, 15000);
+
+    return () => {
+      window.clearInterval(pollingInterval);
+      s.disconnect();
+    };
   }, [missionId, fetchData]);
 
   const toggleMissionStatus = async () => {

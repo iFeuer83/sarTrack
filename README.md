@@ -15,6 +15,7 @@ Applicazione web per il tracciamento GPS in tempo reale dei volontari durante op
 - 🔄 Invio posizione: prima posizione immediata, poi sincronizzazione periodica ogni 60 secondi.
 - 📤 Export tracce: esportazione KML delle tracce per singolo volontario dalla dashboard.
 - 🗃️ Export archivio ricerca in JSON (missione + volontari + posizioni) dalla dashboard admin.
+- 📲 Supporto PWA installabile (manifest + service worker) per uso da smartphone.
 - 📦 Database locale SQLite.
 
 ## Requisiti
@@ -32,6 +33,11 @@ Applicazione web per il tracciamento GPS in tempo reale dei volontari durante op
    npm run dev
    ```
 4. Apri `http://localhost:3000` nel browser.
+
+## Installazione PWA
+- Apri l'app da browser mobile in HTTPS (es. Render).
+- Usa "Aggiungi a schermata Home" / "Installa app" dal browser.
+- La PWA migliora l'esperienza mobile e caching, ma non sostituisce i limiti background del sistema operativo.
 
 ## Pubblicazione su GitHub
 1. Crea un nuovo repository su GitHub.
