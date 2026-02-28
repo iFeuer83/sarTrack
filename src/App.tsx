@@ -85,6 +85,8 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
   const watchIdRef = useRef<number | null>(null);
   const sessionBlockedRef = useRef(false);
   const firstTransmissionDoneRef = useRef(false);
+  const queueRef = useRef<Location[]>(JSON.parse(localStorage.getItem('rt_queue') || '[]'));
+  const lastPosRef = useRef<GeolocationCoordinates | null>(null);
   
   const volunteerId = useRef(localStorage.getItem('rt_vid') || Math.random().toString(36).substring(2, 15)).current;
 
@@ -113,6 +115,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
 
   useEffect(() => {
     localStorage.setItem('rt_queue', JSON.stringify(queue));
+    queueRef.current = queue;
   }, [queue]);
 
   const sendLocations = useCallback(async (locationsToSend: Location[]) => {
@@ -147,26 +150,30 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
   const syncQueue = useCallback(async () => {
     if (!navigator.onLine) return;
 
-    if (queue.length > 0) {
-      const sent = await sendLocations(queue);
+    const pendingQueue = queueRef.current;
+    if (pendingQueue.length > 0) {
+      const sent = await sendLocations(pendingQueue);
       if (sent) {
+        queueRef.current = [];
         setQueue([]);
       }
       return;
     }
 
-    if (lastPos) {
+    if (lastPosRef.current) {
       const heartbeatLoc: Location = {
-        lat: lastPos.latitude,
-        lng: lastPos.longitude,
+        lat: lastPosRef.current.latitude,
+        lng: lastPosRef.current.longitude,
         timestamp: new Date().toISOString()
       };
       await sendLocations([heartbeatLoc]);
     }
-  }, [queue, sendLocations, lastPos]);
+  }, [sendLocations]);
 
   useEffect(() => {
-    const interval = setInterval(syncQueue, SYNC_INTERVAL_MS);
+    const interval = setInterval(() => {
+      void syncQueue();
+    }, SYNC_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [syncQueue, SYNC_INTERVAL_MS]);
 
@@ -190,6 +197,7 @@ const VolunteerView = ({ missionId }: { missionId: string }) => {
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         setLastPos(pos.coords);
+        lastPosRef.current = pos.coords;
         const newLoc = {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
