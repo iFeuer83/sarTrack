@@ -39,6 +39,29 @@ Applicazione web per il tracciamento GPS in tempo reale dei volontari durante op
 - Usa "Aggiungi a schermata Home" / "Installa app" dal browser.
 - La PWA migliora l'esperienza mobile e caching, ma non sostituisce i limiti background del sistema operativo.
 
+## App Mobile Dedicata (APK)
+Nel repository è presente anche una versione mobile dedicata in [mobile-app/package.json](mobile-app/package.json) (Expo React Native), pensata per il flusso operativo minimo:
+- scansione QR missione,
+- consenso trattamento dati per solo scopo soccorso,
+- schermata semplice con stato tracciamento attivo/non attivo.
+
+### Avvio mobile (sviluppo)
+1. Vai nella cartella mobile:
+   ```bash
+   cd mobile-app
+   ```
+2. Installa dipendenze:
+   ```bash
+   npm install
+   ```
+3. Avvia Expo:
+   ```bash
+   npm start
+   ```
+
+### Build APK (step successivo)
+Per APK/Store si usa normalmente EAS Build (`eas build`) partendo dal progetto `mobile-app`.
+
 ## Pubblicazione su GitHub
 1. Crea un nuovo repository su GitHub.
 2. Inizializza git e carica il codice:

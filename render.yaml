@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: rescuetrack-dashboard
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /var/data/rescue.db
+      - key: ADMIN_PASSWORD
+        sync: false
+    disks:
+      - name: rescuetrack-data
+        mountPath: /var/data
+        sizeGB: 1

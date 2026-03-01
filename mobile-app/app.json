@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "RescueTrack Mobile",
+    "slug": "rescuetrack-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "../logo.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "../logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "La fotocamera serve per inquadrare il QR della missione.",
+        "NSLocationWhenInUseUsageDescription": "La posizione viene usata per la gestione dell'attività di soccorso.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "La posizione viene usata per la gestione dell'attività di soccorso anche durante l'intervento."
+      }
+    },
+    "android": {
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "../logo.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.rescuetrack.mobile"
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-location",
+      "expo-task-manager"
+    ]
+  }
+}
